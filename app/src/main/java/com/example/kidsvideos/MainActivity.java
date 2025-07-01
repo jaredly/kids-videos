@@ -23,7 +23,7 @@ import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.fragment.app.FragmentActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.concurrent.Executor;
@@ -105,7 +105,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupRecyclerView() {
         videoFiles = new ArrayList<>();
         videoAdapter = new VideoAdapter(videoFiles, this::playVideo);
-        recyclerVideos.setLayoutManager(new LinearLayoutManager(this));
+        recyclerVideos.setLayoutManager(new GridLayoutManager(this, 2)); // 2 columns
         recyclerVideos.setAdapter(videoAdapter);
     }
 
