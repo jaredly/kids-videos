@@ -2,6 +2,7 @@ package com.example.kidsvideos;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -26,12 +27,16 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String PREFS_NAME = "KidsVideosPrefs";
+    private static final String PREF_SELECTED_FOLDER_URI = "selected_folder_uri";
+
     private Button btnSelectFolder;
     private TextView tvCurrentFolder;
     private TextView tvNoVideos;
     private RecyclerView recyclerVideos;
     private VideoAdapter videoAdapter;
     private List<File> videoFiles;
+    private SharedPreferences prefs;
 
     private ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
@@ -51,28 +56,32 @@ public class MainActivity extends AppCompatActivity {
 
     private ActivityResultLauncher<Intent> folderPickerLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                     Uri uri = result.getData().getData();
                     if (uri != null) {
                         // Take persistent permission
                         getContentResolver().takePersistableUriPermission(uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        // Save the selected folder URI
+                        saveSelectedFolderUri(uri);
                         loadVideosFromUri(uri);
                     }
                 }
             });
 
-    @Override
+        @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         initViews();
         setupRecyclerView();
         setupListeners();
 
-        // Load default folder (Movies or Downloads)
-        loadDefaultFolder();
+        // Load previously selected folder or default folder
+        loadSavedFolderOrDefault();
     }
 
     private void initViews() {
@@ -132,10 +141,53 @@ public class MainActivity extends AppCompatActivity {
         folderPickerLauncher.launch(intent);
     }
 
+    private void loadSavedFolderOrDefault() {
+        if (hasStoragePermission()) {
+            // Try to load previously selected folder first
+            String savedUriString = prefs.getString(PREF_SELECTED_FOLDER_URI, null);
+            if (savedUriString != null) {
+                try {
+                    Uri savedUri = Uri.parse(savedUriString);
+                    // Check if we still have permission to access this URI
+                    if (hasUriPermission(savedUri)) {
+                        loadVideosFromUri(savedUri);
+                        return;
+                    } else {
+                        // Permission lost, clear the saved URI
+                        clearSavedFolderUri();
+                    }
+                } catch (Exception e) {
+                    // Invalid URI, clear it
+                    clearSavedFolderUri();
+                }
+            }
+
+            // Fall back to common video folders
+            loadCommonVideoFolders();
+        }
+    }
+
     private void loadDefaultFolder() {
         if (hasStoragePermission()) {
             // Load from common video folders as fallback
             loadCommonVideoFolders();
+        }
+    }
+
+    private void saveSelectedFolderUri(Uri uri) {
+        prefs.edit().putString(PREF_SELECTED_FOLDER_URI, uri.toString()).apply();
+    }
+
+    private void clearSavedFolderUri() {
+        prefs.edit().remove(PREF_SELECTED_FOLDER_URI).apply();
+    }
+
+    private boolean hasUriPermission(Uri uri) {
+        try {
+            DocumentFile documentFile = DocumentFile.fromTreeUri(this, uri);
+            return documentFile != null && documentFile.exists() && documentFile.canRead();
+        } catch (Exception e) {
+            return false;
         }
     }
 
