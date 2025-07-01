@@ -126,14 +126,22 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             }
         }
 
-        private String getVideoDuration(File videoFile) {
+                private String getVideoDuration(File videoFile) {
             try {
                 MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-                retriever.setDataSource(videoFile.getAbsolutePath());
+
+                // Check if it's a content URI or regular file path
+                String path = videoFile.getAbsolutePath();
+                if (path.startsWith("content://")) {
+                    retriever.setDataSource(itemView.getContext(), Uri.parse(path));
+                } else {
+                    retriever.setDataSource(path);
+                }
+
                 String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
                 retriever.release();
 
-                if (durationStr != null) {
+                if (durationStr != null && !durationStr.isEmpty()) {
                     long duration = Long.parseLong(durationStr);
                     long minutes = TimeUnit.MILLISECONDS.toMinutes(duration);
                     long seconds = TimeUnit.MILLISECONDS.toSeconds(duration) -
@@ -142,6 +150,8 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
                 }
             } catch (Exception e) {
                 e.printStackTrace();
+                // Log the specific error for debugging
+                System.out.println("Error getting duration for: " + videoFile.getAbsolutePath() + " - " + e.getMessage());
             }
             return "Unknown";
         }
