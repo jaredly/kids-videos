@@ -243,11 +243,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void proceedWithFolderSelection() {
-        if (hasStoragePermission()) {
-            openFolderPicker();
-        } else {
-            requestStoragePermission();
-        }
+        // Modern document picker doesn't require storage permissions
+        openFolderPicker();
     }
 
     private boolean hasStoragePermission() {
@@ -284,28 +281,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadSavedFolderOrDefault() {
-        if (hasStoragePermission()) {
-            // Try to load previously selected folder first
-            String savedUriString = prefs.getString(PREF_SELECTED_FOLDER_URI, null);
-            if (savedUriString != null) {
-                try {
-                    Uri savedUri = Uri.parse(savedUriString);
-                    // Check if we still have permission to access this URI
-                    if (hasUriPermission(savedUri)) {
-                        loadVideosFromUri(savedUri);
-                        return;
-                    } else {
-                        // Permission lost, clear the saved URI
-                        clearSavedFolderUri();
-                    }
-                } catch (Exception e) {
-                    // Invalid URI, clear it
+        // Try to load previously selected folder first (works with document picker URIs)
+        String savedUriString = prefs.getString(PREF_SELECTED_FOLDER_URI, null);
+        if (savedUriString != null) {
+            try {
+                Uri savedUri = Uri.parse(savedUriString);
+                // Check if we still have permission to access this URI
+                if (hasUriPermission(savedUri)) {
+                    loadVideosFromUri(savedUri);
+                    return;
+                } else {
+                    // Permission lost, clear the saved URI
                     clearSavedFolderUri();
                 }
+            } catch (Exception e) {
+                // Invalid URI, clear it
+                clearSavedFolderUri();
             }
+        }
 
-            // Fall back to common video folders
+        // Fall back to common video folders only if we have storage permissions
+        if (hasStoragePermission()) {
             loadCommonVideoFolders();
+        } else {
+            // No saved folder and no storage permissions - show empty state
+            videoFiles.clear();
+            if (getSupportActionBar() != null) {
+                getSupportActionBar().setSubtitle("Tap gear icon to select folder");
+            }
+            updateEmptyState();
         }
     }
 
@@ -473,6 +477,12 @@ public class MainActivity extends AppCompatActivity {
         if (getSupportActionBar() != null) {
             getSupportActionBar().setSubtitle("📁 " + folderName);
         }
+    }
+
+    private void updateEmptyState() {
+        tvNoVideos.setVisibility(TextView.VISIBLE);
+        recyclerVideos.setVisibility(RecyclerView.GONE);
+        videoAdapter.notifyDataSetChanged();
     }
 
         private boolean isVideoFile(File file) {
