@@ -1,6 +1,7 @@
 package com.example.kidsvideos;
 
 import android.Manifest;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -12,13 +13,20 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
+
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
+import androidx.fragment.app.FragmentActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import java.util.concurrent.Executor;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -37,6 +45,8 @@ public class MainActivity extends AppCompatActivity {
     private VideoAdapter videoAdapter;
     private List<File> videoFiles;
     private SharedPreferences prefs;
+    private BiometricPrompt biometricPrompt;
+    private BiometricPrompt.PromptInfo promptInfo;
 
     private ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
@@ -74,11 +84,12 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         initViews();
         setupRecyclerView();
         setupListeners();
+        setupBiometricAuthentication();
 
         // Load previously selected folder or default folder
         loadSavedFolderOrDefault();
@@ -99,13 +110,95 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupListeners() {
-        btnSelectFolder.setOnClickListener(v -> {
-            if (hasStoragePermission()) {
-                openFolderPicker();
-            } else {
-                requestStoragePermission();
-            }
-        });
+        btnSelectFolder.setOnClickListener(v -> showFolderChangeConfirmation());
+    }
+
+    private void showFolderChangeConfirmation() {
+        new AlertDialog.Builder(this)
+            .setTitle("Change Video Folder")
+            .setMessage("Do you really want to change the video folder?\n\nThis will require authentication.")
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setPositiveButton("Yes", (dialog, which) -> {
+                dialog.dismiss();
+                authenticateAndSelectFolder();
+            })
+            .setNegativeButton("No", (dialog, which) -> dialog.dismiss())
+            .setCancelable(true)
+            .show();
+    }
+
+    private void setupBiometricAuthentication() {
+        Executor executor = ContextCompat.getMainExecutor(this);
+        biometricPrompt = new BiometricPrompt((FragmentActivity) this, executor,
+            new BiometricPrompt.AuthenticationCallback() {
+                @Override
+                public void onAuthenticationError(int errorCode, CharSequence errString) {
+                    super.onAuthenticationError(errorCode, errString);
+                    Toast.makeText(MainActivity.this,
+                        "Authentication error: " + errString, Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                    super.onAuthenticationSucceeded(result);
+                    // Authentication successful, proceed with folder selection
+                    proceedWithFolderSelection();
+                }
+
+                @Override
+                public void onAuthenticationFailed() {
+                    super.onAuthenticationFailed();
+                    Toast.makeText(MainActivity.this,
+                        "Authentication failed", Toast.LENGTH_SHORT).show();
+                }
+            });
+
+        promptInfo = new BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Folder Selection Access")
+            .setSubtitle("Authenticate to change video folder")
+            .setDescription("Use your fingerprint, face, or device PIN to access folder settings")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK |
+                                    BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build();
+    }
+
+    private void authenticateAndSelectFolder() {
+        BiometricManager biometricManager = BiometricManager.from(this);
+
+        switch (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK |
+                                               BiometricManager.Authenticators.DEVICE_CREDENTIAL)) {
+            case BiometricManager.BIOMETRIC_SUCCESS:
+                // Biometric/PIN authentication is available
+                biometricPrompt.authenticate(promptInfo);
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE:
+                // No biometric features available - proceed without authentication
+                Toast.makeText(this, "No authentication available, proceeding...", Toast.LENGTH_SHORT).show();
+                proceedWithFolderSelection();
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE:
+                // Biometric features are currently unavailable
+                Toast.makeText(this, "Biometric features are currently unavailable", Toast.LENGTH_SHORT).show();
+                proceedWithFolderSelection();
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED:
+                // No biometric credentials enrolled - proceed without authentication
+                Toast.makeText(this, "No lock screen security set up, proceeding...", Toast.LENGTH_SHORT).show();
+                proceedWithFolderSelection();
+                break;
+            default:
+                // Unknown state - proceed without authentication
+                proceedWithFolderSelection();
+                break;
+        }
+    }
+
+    private void proceedWithFolderSelection() {
+        if (hasStoragePermission()) {
+            openFolderPicker();
+        } else {
+            requestStoragePermission();
+        }
     }
 
     private boolean hasStoragePermission() {
