@@ -19,6 +19,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
 
     private VideoView videoView;
     private ImageButton btnPlayPause;
+    private ImageButton btnClose;
     private SeekBar seekBar;
     private TextView tvDuration;
     private View controlsLayout;
@@ -42,6 +43,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private void initViews() {
         videoView = findViewById(R.id.video_view);
         btnPlayPause = findViewById(R.id.btn_play_pause);
+        btnClose = findViewById(R.id.btn_close);
         seekBar = findViewById(R.id.seek_bar);
         tvDuration = findViewById(R.id.tv_duration);
         controlsLayout = findViewById(R.id.controls_layout);
@@ -92,6 +94,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
 
     private void setupControls() {
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
+        btnClose.setOnClickListener(v -> finish());
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
