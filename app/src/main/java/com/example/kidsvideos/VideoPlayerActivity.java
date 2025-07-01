@@ -50,10 +50,21 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private void setupVideoPlayer() {
         String videoPath = getIntent().getStringExtra("video_path");
         if (videoPath != null) {
-            File videoFile = new File(videoPath);
-            if (videoFile.exists()) {
-                Uri videoUri = Uri.fromFile(videoFile);
-                videoView.setVideoURI(videoUri);
+            Uri videoUri;
+
+            // Check if it's a content URI or file path
+            if (videoPath.startsWith("content://")) {
+                videoUri = Uri.parse(videoPath);
+            } else {
+                File videoFile = new File(videoPath);
+                if (videoFile.exists()) {
+                    videoUri = Uri.fromFile(videoFile);
+                } else {
+                    return; // File doesn't exist
+                }
+            }
+
+            videoView.setVideoURI(videoUri);
 
                 videoView.setOnPreparedListener(mediaPlayer -> {
                     int duration = videoView.getDuration();
@@ -76,7 +87,6 @@ public class VideoPlayerActivity extends AppCompatActivity {
 
                 // Show/hide controls on tap
                 videoView.setOnClickListener(v -> toggleControlsVisibility());
-            }
         }
     }
 

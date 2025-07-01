@@ -3,8 +3,10 @@ package com.example.kidsvideos;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.DocumentsContract;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -13,6 +15,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -40,9 +43,22 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 if (allGranted) {
-                    selectFolder();
+                    openFolderPicker();
                 } else {
                     Toast.makeText(this, getString(R.string.permission_required), Toast.LENGTH_LONG).show();
+                }
+            });
+
+    private ActivityResultLauncher<Intent> folderPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getData();
+                    if (uri != null) {
+                        // Take persistent permission
+                        getContentResolver().takePersistableUriPermission(uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        loadVideosFromUri(uri);
+                    }
                 }
             });
 
@@ -76,7 +92,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupListeners() {
         btnSelectFolder.setOnClickListener(v -> {
             if (hasStoragePermission()) {
-                selectFolder();
+                openFolderPicker();
             } else {
                 requestStoragePermission();
             }
@@ -95,8 +111,36 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void selectFolder() {
-        // For simplicity, we'll browse some common video folders
+        private void openFolderPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                       Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+
+        // Start in the Downloads directory if possible
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                Uri downloadsUri = DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents",
+                    "primary:Download"
+                );
+                intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, downloadsUri);
+            } catch (Exception e) {
+                // Ignore if initial URI setting fails
+            }
+        }
+
+        folderPickerLauncher.launch(intent);
+    }
+
+    private void loadDefaultFolder() {
+        if (hasStoragePermission()) {
+            // Load from common video folders as fallback
+            loadCommonVideoFolders();
+        }
+    }
+
+    private void loadCommonVideoFolders() {
+        // Try common video folders as fallback
         File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES);
         File dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM);
@@ -117,11 +161,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void loadDefaultFolder() {
-        if (hasStoragePermission()) {
-            selectFolder();
-        }
-    }
+
 
     private void loadVideosFromFolder(File folder) {
         videoFiles.clear();
@@ -140,10 +180,70 @@ public class MainActivity extends AppCompatActivity {
         updateUI(folder);
     }
 
-    private boolean isVideoFile(File file) {
-        if (!file.isFile()) return false;
+    private void loadVideosFromUri(Uri uri) {
+        videoFiles.clear();
 
-        String name = file.getName().toLowerCase();
+        try {
+            DocumentFile documentFile = DocumentFile.fromTreeUri(this, uri);
+            if (documentFile != null && documentFile.exists()) {
+                DocumentFile[] files = documentFile.listFiles();
+                for (DocumentFile file : files) {
+                    if (file.isFile() && isVideoFile(file.getName())) {
+                        // Create a VideoFile wrapper to hold both DocumentFile and File info
+                        videoFiles.add(new File(file.getName()) {
+                            @Override
+                            public String getAbsolutePath() {
+                                return file.getUri().toString();
+                            }
+
+                            @Override
+                            public boolean exists() {
+                                return file.exists();
+                            }
+
+                            @Override
+                            public String getName() {
+                                return file.getName();
+                            }
+                        });
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Error accessing folder: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+
+        updateUIForUri(uri);
+    }
+
+    private void updateUIForUri(Uri uri) {
+        if (uri != null) {
+            String path = uri.getLastPathSegment();
+            if (path != null) {
+                tvCurrentFolder.setText("Folder: " + path.replace("primary:", "/storage/emulated/0/"));
+                tvCurrentFolder.setVisibility(TextView.VISIBLE);
+            }
+        }
+
+        if (videoFiles.isEmpty()) {
+            tvNoVideos.setVisibility(TextView.VISIBLE);
+            recyclerVideos.setVisibility(RecyclerView.GONE);
+        } else {
+            tvNoVideos.setVisibility(TextView.GONE);
+            recyclerVideos.setVisibility(RecyclerView.VISIBLE);
+        }
+
+        videoAdapter.notifyDataSetChanged();
+    }
+
+        private boolean isVideoFile(File file) {
+        if (!file.isFile()) return false;
+        return isVideoFile(file.getName());
+    }
+
+    private boolean isVideoFile(String fileName) {
+        if (fileName == null) return false;
+        String name = fileName.toLowerCase();
         return name.endsWith(".mp4") || name.endsWith(".avi") || name.endsWith(".mkv") ||
                name.endsWith(".mov") || name.endsWith(".wmv") || name.endsWith(".flv") ||
                name.endsWith(".webm") || name.endsWith(".m4v") || name.endsWith(".3gp");
