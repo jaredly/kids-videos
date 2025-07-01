@@ -39,6 +39,9 @@ public class MainActivity extends AppCompatActivity {
 
         private static final String PREFS_NAME = "KidsVideosPrefs";
     private static final String PREF_SELECTED_FOLDER_URI = "selected_folder_uri";
+    private static final String PREF_SORT_ORDER = "sort_order";
+    private static final String SORT_DATE_ASC = "date_asc";
+    private static final String SORT_DATE_DESC = "date_desc";
 
     private Toolbar toolbar;
     private TextView tvNoVideos;
@@ -48,6 +51,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
     private BiometricPrompt biometricPrompt;
     private BiometricPrompt.PromptInfo promptInfo;
+    private String currentSortOrder;
 
     private ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
@@ -86,6 +90,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
                         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        currentSortOrder = prefs.getString(PREF_SORT_ORDER, SORT_DATE_DESC);
 
         initViews();
         setupToolbar();
@@ -121,6 +126,9 @@ public class MainActivity extends AppCompatActivity {
         if (item.getItemId() == R.id.action_select_folder) {
             showFolderChangeConfirmation();
             return true;
+        } else if (item.getItemId() == R.id.action_sort) {
+            showSortDialog();
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -145,6 +153,26 @@ public class MainActivity extends AppCompatActivity {
             })
             .setNegativeButton("No", (dialog, which) -> dialog.dismiss())
             .setCancelable(true)
+            .show();
+    }
+
+    private void showSortDialog() {
+        String[] sortOptions = {"Date Modified (Newest First)", "Date Modified (Oldest First)"};
+        int selectedIndex = currentSortOrder.equals(SORT_DATE_DESC) ? 0 : 1;
+
+        new AlertDialog.Builder(this)
+            .setTitle("Sort Videos")
+            .setIcon(android.R.drawable.ic_menu_sort_alphabetically)
+            .setSingleChoiceItems(sortOptions, selectedIndex, (dialog, which) -> {
+                String newSortOrder = (which == 0) ? SORT_DATE_DESC : SORT_DATE_ASC;
+                if (!newSortOrder.equals(currentSortOrder)) {
+                    currentSortOrder = newSortOrder;
+                    saveSortOrder();
+                    refreshVideoList();
+                }
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
             .show();
     }
 
@@ -296,6 +324,26 @@ public class MainActivity extends AppCompatActivity {
         prefs.edit().remove(PREF_SELECTED_FOLDER_URI).apply();
     }
 
+    private void saveSortOrder() {
+        prefs.edit().putString(PREF_SORT_ORDER, currentSortOrder).apply();
+    }
+
+    private void refreshVideoList() {
+        // Re-sort the current video list and refresh UI
+        sortVideoFiles();
+        videoAdapter.notifyDataSetChanged();
+    }
+
+    private void sortVideoFiles() {
+        if (currentSortOrder.equals(SORT_DATE_DESC)) {
+            // Sort by date modified, newest first
+            videoFiles.sort((f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
+        } else {
+            // Sort by date modified, oldest first
+            videoFiles.sort((f1, f2) -> Long.compare(f1.lastModified(), f2.lastModified()));
+        }
+    }
+
     private boolean hasUriPermission(Uri uri) {
         try {
             DocumentFile documentFile = DocumentFile.fromTreeUri(this, uri);
@@ -343,6 +391,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        sortVideoFiles();
         updateUI(folder);
     }
 
@@ -371,6 +420,11 @@ public class MainActivity extends AppCompatActivity {
                             public String getName() {
                                 return file.getName();
                             }
+
+                            @Override
+                            public long lastModified() {
+                                return file.lastModified();
+                            }
                         });
                     }
                 }
@@ -379,6 +433,7 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Error accessing folder: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
 
+        sortVideoFiles();
         updateUIForUri(uri);
     }
 
