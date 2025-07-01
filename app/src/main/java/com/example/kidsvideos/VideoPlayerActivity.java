@@ -137,7 +137,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
                 if (!isUserSeeking && videoView.isPlaying()) {
                     seekBar.setProgress(videoView.getCurrentPosition());
                 }
-                handler.postDelayed(this, 1000);
+                handler.postDelayed(this, 100); // Update every 100ms for smooth animation
             }
         };
         handler.post(updateSeekBarRunnable);
