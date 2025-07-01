@@ -9,11 +9,13 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.DocumentsContract;
-import android.widget.Button;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.widget.Toolbar;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -35,11 +37,10 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String PREFS_NAME = "KidsVideosPrefs";
+        private static final String PREFS_NAME = "KidsVideosPrefs";
     private static final String PREF_SELECTED_FOLDER_URI = "selected_folder_uri";
 
-    private Button btnSelectFolder;
-    private TextView tvCurrentFolder;
+    private Toolbar toolbar;
     private TextView tvNoVideos;
     private RecyclerView recyclerVideos;
     private VideoAdapter videoAdapter;
@@ -84,11 +85,11 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-                prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         initViews();
+        setupToolbar();
         setupRecyclerView();
-        setupListeners();
         setupBiometricAuthentication();
 
         // Load previously selected folder or default folder
@@ -96,10 +97,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        btnSelectFolder = findViewById(R.id.btn_select_folder);
-        tvCurrentFolder = findViewById(R.id.tv_current_folder);
+        toolbar = findViewById(R.id.toolbar);
         tvNoVideos = findViewById(R.id.tv_no_videos);
         recyclerVideos = findViewById(R.id.recycler_videos);
+    }
+
+    private void setupToolbar() {
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle("Kids Videos");
+            getSupportActionBar().setSubtitle("No folder selected");
+        }
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_select_folder) {
+            showFolderChangeConfirmation();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     private void setupRecyclerView() {
@@ -109,9 +132,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerVideos.setAdapter(videoAdapter);
     }
 
-    private void setupListeners() {
-        btnSelectFolder.setOnClickListener(v -> showFolderChangeConfirmation());
-    }
+
 
     private void showFolderChangeConfirmation() {
         new AlertDialog.Builder(this)
@@ -365,8 +386,8 @@ public class MainActivity extends AppCompatActivity {
         if (uri != null) {
             String path = uri.getLastPathSegment();
             if (path != null) {
-                tvCurrentFolder.setText("Folder: " + path.replace("primary:", "/storage/emulated/0/"));
-                tvCurrentFolder.setVisibility(TextView.VISIBLE);
+                String folderName = extractFolderName(path);
+                updateToolbarSubtitle(folderName);
             }
         }
 
@@ -379,6 +400,24 @@ public class MainActivity extends AppCompatActivity {
         }
 
         videoAdapter.notifyDataSetChanged();
+    }
+
+    private String extractFolderName(String path) {
+        if (path.contains("primary:")) {
+            String cleanPath = path.replace("primary:", "");
+            if (cleanPath.startsWith("/")) {
+                cleanPath = cleanPath.substring(1);
+            }
+            String[] parts = cleanPath.split("/");
+            return parts.length > 0 ? parts[parts.length - 1] : "Storage";
+        }
+        return path;
+    }
+
+    private void updateToolbarSubtitle(String folderName) {
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setSubtitle("📁 " + folderName);
+        }
     }
 
         private boolean isVideoFile(File file) {
@@ -396,8 +435,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateUI(File folder) {
         if (folder != null) {
-            tvCurrentFolder.setText("Folder: " + folder.getAbsolutePath());
-            tvCurrentFolder.setVisibility(TextView.VISIBLE);
+            updateToolbarSubtitle(folder.getName());
         }
 
         if (videoFiles.isEmpty()) {
