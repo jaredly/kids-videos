@@ -98,7 +98,7 @@ public class ThumbnailCache {
         return thumbnail;
     }
 
-    private Bitmap generateThumbnail(Context context, java.io.File videoFile) {
+        private Bitmap generateThumbnail(Context context, java.io.File videoFile) {
         try {
             MediaMetadataRetriever retriever = new MediaMetadataRetriever();
 
@@ -110,8 +110,25 @@ public class ThumbnailCache {
                 retriever.setDataSource(path);
             }
 
-            // Get frame at 1 second into the video
-            Bitmap rawThumbnail = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            // Get video duration and calculate halfway point
+            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long thumbnailTime = 1000000; // Default to 1 second if duration unavailable
+
+            if (durationStr != null && !durationStr.isEmpty()) {
+                try {
+                    long durationMs = Long.parseLong(durationStr);
+                    // Get frame from halfway through the video (convert ms to microseconds)
+                    thumbnailTime = (durationMs / 2) * 1000;
+
+                    // Ensure we don't go beyond video duration and have a minimum of 0.5 seconds
+                    thumbnailTime = Math.max(500000, Math.min(thumbnailTime, durationMs * 1000 - 100000));
+                } catch (NumberFormatException e) {
+                    Log.w(TAG, "Invalid duration format, using default time", e);
+                }
+            }
+
+            // Get frame at calculated time
+            Bitmap rawThumbnail = retriever.getFrameAtTime(thumbnailTime, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             retriever.release();
 
             if (rawThumbnail != null) {
