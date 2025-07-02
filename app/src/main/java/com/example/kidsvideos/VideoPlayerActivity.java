@@ -29,6 +29,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private boolean isPlaying = false;
     private boolean isUserSeeking = false;
     private Runnable updateSeekBarRunnable;
+    private Runnable hideControlsRunnable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,6 +82,9 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     isPlaying = true;
                     btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                     startSeekBarUpdate();
+
+                    // Start auto-hide timer when video begins
+                    startControlsAutoHide();
                 });
 
                 videoView.setOnCompletionListener(mediaPlayer -> {
@@ -106,12 +110,14 @@ public class VideoPlayerActivity extends AppCompatActivity {
                 if (fromUser) {
                     videoView.seekTo(progress);
                     tvCurrentTime.setText(formatTime(progress));
+                    resetControlsAutoHide(); // Reset timer when user scrubs
                 }
             }
 
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {
                 isUserSeeking = true;
+                resetControlsAutoHide(); // Reset timer when user starts seeking
             }
 
             @Override
@@ -120,6 +126,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
                 int seekPosition = seekBar.getProgress();
                 videoView.seekTo(seekPosition);
                 tvCurrentTime.setText(formatTime(seekPosition));
+                resetControlsAutoHide(); // Reset timer when user finishes seeking
             }
         });
     }
@@ -135,6 +142,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
             startSeekBarUpdate();
         }
         isPlaying = !isPlaying;
+        resetControlsAutoHide(); // Reset timer when user interacts with play/pause
     }
 
     private void startSeekBarUpdate() {
@@ -160,11 +168,42 @@ public class VideoPlayerActivity extends AppCompatActivity {
 
     private void toggleControlsVisibility() {
         if (controlsLayout.getVisibility() == View.VISIBLE) {
-            controlsLayout.setVisibility(View.GONE);
+            hideControls();
         } else {
-            controlsLayout.setVisibility(View.VISIBLE);
-            // Auto-hide after 3 seconds
-            handler.postDelayed(() -> controlsLayout.setVisibility(View.GONE), 3000);
+            showControls();
+        }
+    }
+
+    private void showControls() {
+        controlsLayout.setVisibility(View.VISIBLE);
+        startControlsAutoHide();
+    }
+
+    private void hideControls() {
+        controlsLayout.setVisibility(View.GONE);
+        cancelControlsAutoHide();
+    }
+
+    private void startControlsAutoHide() {
+        // Cancel any existing auto-hide timer
+        cancelControlsAutoHide();
+
+        // Start new auto-hide timer
+        hideControlsRunnable = () -> hideControls();
+        handler.postDelayed(hideControlsRunnable, 3000);
+    }
+
+    private void cancelControlsAutoHide() {
+        if (hideControlsRunnable != null) {
+            handler.removeCallbacks(hideControlsRunnable);
+            hideControlsRunnable = null;
+        }
+    }
+
+    private void resetControlsAutoHide() {
+        // Only reset if controls are currently visible
+        if (controlsLayout.getVisibility() == View.VISIBLE) {
+            startControlsAutoHide();
         }
     }
 
@@ -191,11 +230,13 @@ public class VideoPlayerActivity extends AppCompatActivity {
             btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
         }
         stopSeekBarUpdate();
+        cancelControlsAutoHide();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         stopSeekBarUpdate();
+        cancelControlsAutoHide();
     }
 }
