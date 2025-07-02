@@ -53,6 +53,8 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
     private BiometricPrompt biometricPrompt;
     private BiometricPrompt.PromptInfo promptInfo;
+    private BiometricPrompt biometricPromptClear;
+    private BiometricPrompt.PromptInfo promptInfoClear;
     private String currentSortOrder;
     private Set<String> selectedFolderUris;
 
@@ -166,27 +168,30 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
 
-    private void showClearFoldersConfirmation() {
-        int folderCount = selectedFolderUris.size();
-        String message = folderCount == 0 ?
-            "No folders are currently selected." :
-            "Remove all " + folderCount + " selected folders?\n\nThis will clear your video collection.";
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-            .setTitle("Clear All Folders")
-            .setMessage(message)
-            .setIcon(android.R.drawable.ic_dialog_alert)
-            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
-            .setCancelable(true);
-
-        if (folderCount > 0) {
-            builder.setPositiveButton("Clear All", (dialog, which) -> {
-                clearAllFolders();
-                dialog.dismiss();
-            });
+        private void showClearFoldersConfirmation() {
+        if (selectedFolderUris.isEmpty()) {
+            // No authentication needed if no folders are selected
+            new AlertDialog.Builder(this)
+                .setTitle("Clear All Folders")
+                .setMessage("No folders are currently selected.")
+                .setIcon(android.R.drawable.ic_dialog_info)
+                .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                .setCancelable(true)
+                .show();
+        } else {
+            // Show authentication prompt for clearing folders
+            new AlertDialog.Builder(this)
+                .setTitle("Clear All Folders")
+                .setMessage("Remove all selected folders from your collection?\n\nThis will require authentication.")
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setPositiveButton("Clear All", (dialog, which) -> {
+                    dialog.dismiss();
+                    authenticateAndClearFolders();
+                })
+                .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
+                .setCancelable(true)
+                .show();
         }
-
-        builder.show();
     }
 
         private void showSortDialog() {
@@ -227,6 +232,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupBiometricAuthentication() {
         Executor executor = ContextCompat.getMainExecutor(this);
+
+        // Biometric prompt for folder selection
         biometricPrompt = new BiometricPrompt((FragmentActivity) this, executor,
             new BiometricPrompt.AuthenticationCallback() {
                 @Override
@@ -253,8 +260,41 @@ public class MainActivity extends AppCompatActivity {
 
         promptInfo = new BiometricPrompt.PromptInfo.Builder()
             .setTitle("Folder Selection Access")
-            .setSubtitle("Authenticate to change video folder")
+            .setSubtitle("Authenticate to add video folder")
             .setDescription("Use your fingerprint, face, or device PIN to access folder settings")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK |
+                                    BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build();
+
+        // Biometric prompt for clearing folders
+        biometricPromptClear = new BiometricPrompt((FragmentActivity) this, executor,
+            new BiometricPrompt.AuthenticationCallback() {
+                @Override
+                public void onAuthenticationError(int errorCode, CharSequence errString) {
+                    super.onAuthenticationError(errorCode, errString);
+                    Toast.makeText(MainActivity.this,
+                        "Authentication error: " + errString, Toast.LENGTH_SHORT).show();
+                }
+
+                @Override
+                public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                    super.onAuthenticationSucceeded(result);
+                    // Authentication successful, proceed with folder clearing
+                    proceedWithFolderClearing();
+                }
+
+                @Override
+                public void onAuthenticationFailed() {
+                    super.onAuthenticationFailed();
+                    Toast.makeText(MainActivity.this,
+                        "Authentication failed", Toast.LENGTH_SHORT).show();
+                }
+            });
+
+        promptInfoClear = new BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Clear All Folders")
+            .setSubtitle("Authenticate to clear video collection")
+            .setDescription("Use your fingerprint, face, or device PIN to clear all folders")
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK |
                                     BiometricManager.Authenticators.DEVICE_CREDENTIAL)
             .build();
@@ -291,9 +331,55 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void authenticateAndClearFolders() {
+        BiometricManager biometricManager = BiometricManager.from(this);
+
+        switch (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK |
+                                               BiometricManager.Authenticators.DEVICE_CREDENTIAL)) {
+            case BiometricManager.BIOMETRIC_SUCCESS:
+                // Biometric/PIN authentication is available
+                biometricPromptClear.authenticate(promptInfoClear);
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE:
+                // No biometric features available - proceed without authentication
+                Toast.makeText(this, "No authentication available, proceeding...", Toast.LENGTH_SHORT).show();
+                proceedWithFolderClearing();
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE:
+                // Biometric features are currently unavailable
+                Toast.makeText(this, "Biometric features are currently unavailable", Toast.LENGTH_SHORT).show();
+                proceedWithFolderClearing();
+                break;
+            case BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED:
+                // No biometric credentials enrolled - proceed without authentication
+                Toast.makeText(this, "No lock screen security set up, proceeding...", Toast.LENGTH_SHORT).show();
+                proceedWithFolderClearing();
+                break;
+            default:
+                // Unknown state - proceed without authentication
+                proceedWithFolderClearing();
+                break;
+        }
+    }
+
     private void proceedWithFolderSelection() {
         // Modern document picker doesn't require storage permissions
         openFolderPicker();
+    }
+
+    private void proceedWithFolderClearing() {
+        int folderCount = selectedFolderUris.size();
+        new AlertDialog.Builder(this)
+            .setTitle("Clear All Folders")
+            .setMessage("Remove all " + folderCount + " selected folders?\n\nThis will clear your video collection.")
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setPositiveButton("Clear All", (dialog, which) -> {
+                clearAllFolders();
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
+            .setCancelable(true)
+            .show();
     }
 
     private boolean hasStoragePermission() {
