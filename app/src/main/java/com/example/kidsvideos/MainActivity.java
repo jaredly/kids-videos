@@ -34,11 +34,13 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
         private static final String PREFS_NAME = "KidsVideosPrefs";
-    private static final String PREF_SELECTED_FOLDER_URI = "selected_folder_uri";
+    private static final String PREF_SELECTED_FOLDER_URIS = "selected_folder_uris";
     private static final String PREF_SORT_ORDER = "sort_order";
     private static final String SORT_DATE_ASC = "date_asc";
     private static final String SORT_DATE_DESC = "date_desc";
@@ -52,6 +54,7 @@ public class MainActivity extends AppCompatActivity {
     private BiometricPrompt biometricPrompt;
     private BiometricPrompt.PromptInfo promptInfo;
     private String currentSortOrder;
+    private Set<String> selectedFolderUris;
 
     private ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
@@ -77,9 +80,9 @@ public class MainActivity extends AppCompatActivity {
                         // Take persistent permission
                         getContentResolver().takePersistableUriPermission(uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        // Save the selected folder URI
-                        saveSelectedFolderUri(uri);
-                        loadVideosFromUri(uri);
+                        // Add the folder to our collection
+                        addFolderUri(uri);
+                        loadVideosFromAllFolders();
                     }
                 }
             });
@@ -91,6 +94,7 @@ public class MainActivity extends AppCompatActivity {
 
                         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         currentSortOrder = prefs.getString(PREF_SORT_ORDER, SORT_DATE_DESC);
+        selectedFolderUris = loadSelectedFolderUris();
 
         initViews();
         setupToolbar();
@@ -123,8 +127,11 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == R.id.action_select_folder) {
-            showFolderChangeConfirmation();
+        if (item.getItemId() == R.id.action_add_folder) {
+            showAddFolderConfirmation();
+            return true;
+        } else if (item.getItemId() == R.id.action_clear_folders) {
+            showClearFoldersConfirmation();
             return true;
         } else if (item.getItemId() == R.id.action_sort) {
             showSortDialog();
@@ -145,18 +152,41 @@ public class MainActivity extends AppCompatActivity {
 
 
 
-    private void showFolderChangeConfirmation() {
+    private void showAddFolderConfirmation() {
         new AlertDialog.Builder(this)
-            .setTitle("Change Video Folder")
-            .setMessage("Do you really want to change the video folder?\n\nThis will require authentication.")
-            .setIcon(android.R.drawable.ic_dialog_alert)
-            .setPositiveButton("Yes", (dialog, which) -> {
+            .setTitle("Add Video Folder")
+            .setMessage("Add another folder to your video collection?\n\nThis will require authentication.")
+            .setIcon(android.R.drawable.ic_dialog_info)
+            .setPositiveButton("Add Folder", (dialog, which) -> {
                 dialog.dismiss();
                 authenticateAndSelectFolder();
             })
-            .setNegativeButton("No", (dialog, which) -> dialog.dismiss())
+            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
             .setCancelable(true)
             .show();
+    }
+
+    private void showClearFoldersConfirmation() {
+        int folderCount = selectedFolderUris.size();
+        String message = folderCount == 0 ?
+            "No folders are currently selected." :
+            "Remove all " + folderCount + " selected folders?\n\nThis will clear your video collection.";
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+            .setTitle("Clear All Folders")
+            .setMessage(message)
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
+            .setCancelable(true);
+
+        if (folderCount > 0) {
+            builder.setPositiveButton("Clear All", (dialog, which) -> {
+                clearAllFolders();
+                dialog.dismiss();
+            });
+        }
+
+        builder.show();
     }
 
         private void showSortDialog() {
@@ -300,35 +330,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadSavedFolderOrDefault() {
-        // Try to load previously selected folder first (works with document picker URIs)
-        String savedUriString = prefs.getString(PREF_SELECTED_FOLDER_URI, null);
-        if (savedUriString != null) {
-            try {
-                Uri savedUri = Uri.parse(savedUriString);
-                // Check if we still have permission to access this URI
-                if (hasUriPermission(savedUri)) {
-                    loadVideosFromUri(savedUri);
-                    return;
-                } else {
-                    // Permission lost, clear the saved URI
-                    clearSavedFolderUri();
-                }
-            } catch (Exception e) {
-                // Invalid URI, clear it
-                clearSavedFolderUri();
-            }
-        }
-
-        // Fall back to common video folders only if we have storage permissions
-        if (hasStoragePermission()) {
-            loadCommonVideoFolders();
+        if (!selectedFolderUris.isEmpty()) {
+            // Load videos from all selected folders
+            loadVideosFromAllFolders();
         } else {
-            // No saved folder and no storage permissions - show empty state
-            videoFiles.clear();
-            if (getSupportActionBar() != null) {
-                getSupportActionBar().setSubtitle("Tap gear icon to select folder");
+            // Fall back to common video folders only if we have storage permissions
+            if (hasStoragePermission()) {
+                loadCommonVideoFolders();
+            } else {
+                // No saved folders and no storage permissions - show empty state
+                videoFiles.clear();
+                updateToolbarSubtitle("No folders selected");
+                updateEmptyState();
             }
-            updateEmptyState();
         }
     }
 
@@ -339,12 +353,34 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void saveSelectedFolderUri(Uri uri) {
-        prefs.edit().putString(PREF_SELECTED_FOLDER_URI, uri.toString()).apply();
+    private Set<String> loadSelectedFolderUris() {
+        Set<String> uris = prefs.getStringSet(PREF_SELECTED_FOLDER_URIS, new HashSet<>());
+        // Create a new HashSet to avoid modifying the returned set directly
+        return new HashSet<>(uris);
     }
 
-    private void clearSavedFolderUri() {
-        prefs.edit().remove(PREF_SELECTED_FOLDER_URI).apply();
+    private void saveSelectedFolderUris() {
+        prefs.edit().putStringSet(PREF_SELECTED_FOLDER_URIS, selectedFolderUris).apply();
+    }
+
+    private void addFolderUri(Uri uri) {
+        String uriString = uri.toString();
+        if (!selectedFolderUris.contains(uriString)) {
+            selectedFolderUris.add(uriString);
+            saveSelectedFolderUris();
+            Toast.makeText(this, "Folder added to collection", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Folder already in collection", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void clearAllFolders() {
+        selectedFolderUris.clear();
+        saveSelectedFolderUris();
+        videoFiles.clear();
+        updateToolbarSubtitle("No folders selected");
+        updateEmptyState();
+        Toast.makeText(this, "All folders cleared", Toast.LENGTH_SHORT).show();
     }
 
     private void saveSortOrder() {
@@ -418,9 +454,35 @@ public class MainActivity extends AppCompatActivity {
         updateUI(folder);
     }
 
-    private void loadVideosFromUri(Uri uri) {
+    private void loadVideosFromAllFolders() {
         videoFiles.clear();
 
+        // Load videos from all selected folders
+        for (String uriString : selectedFolderUris) {
+            try {
+                Uri uri = Uri.parse(uriString);
+                // Check if we still have permission to access this URI
+                if (hasUriPermission(uri)) {
+                    loadVideosFromUri(uri, false); // Don't update UI for each folder
+                } else {
+                    // Permission lost, remove this URI from collection
+                    selectedFolderUris.remove(uriString);
+                    saveSelectedFolderUris();
+                    Toast.makeText(this, "Lost access to a folder, removed from collection", Toast.LENGTH_SHORT).show();
+                }
+            } catch (Exception e) {
+                // Invalid URI, remove it from collection
+                selectedFolderUris.remove(uriString);
+                saveSelectedFolderUris();
+            }
+        }
+
+        sortVideoFiles();
+        updateToolbarWithFolderCount();
+        updateVideoListUI();
+    }
+
+    private void loadVideosFromUri(Uri uri, boolean updateUI) {
         try {
             DocumentFile documentFile = DocumentFile.fromTreeUri(this, uri);
             if (documentFile != null && documentFile.exists()) {
@@ -456,8 +518,10 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Error accessing folder: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
 
-        sortVideoFiles();
-        updateUIForUri(uri);
+        if (updateUI) {
+            sortVideoFiles();
+            updateUIForUri(uri);
+        }
     }
 
     private void updateUIForUri(Uri uri) {
@@ -492,15 +556,39 @@ public class MainActivity extends AppCompatActivity {
         return path;
     }
 
-    private void updateToolbarSubtitle(String folderName) {
+    private void updateToolbarSubtitle(String subtitle) {
         if (getSupportActionBar() != null) {
-            getSupportActionBar().setSubtitle("📁 " + folderName);
+            getSupportActionBar().setSubtitle(subtitle);
         }
+    }
+
+    private void updateToolbarWithFolderCount() {
+        int folderCount = selectedFolderUris.size();
+        String subtitle;
+        if (folderCount == 0) {
+            subtitle = "No folders selected";
+        } else if (folderCount == 1) {
+            subtitle = "📁 1 folder selected";
+        } else {
+            subtitle = "📁 " + folderCount + " folders selected";
+        }
+        updateToolbarSubtitle(subtitle);
     }
 
     private void updateEmptyState() {
         tvNoVideos.setVisibility(TextView.VISIBLE);
         recyclerVideos.setVisibility(RecyclerView.GONE);
+        videoAdapter.notifyDataSetChanged();
+    }
+
+    private void updateVideoListUI() {
+        if (videoFiles.isEmpty()) {
+            tvNoVideos.setVisibility(TextView.VISIBLE);
+            recyclerVideos.setVisibility(RecyclerView.GONE);
+        } else {
+            tvNoVideos.setVisibility(TextView.GONE);
+            recyclerVideos.setVisibility(RecyclerView.VISIBLE);
+        }
         videoAdapter.notifyDataSetChanged();
     }
 
