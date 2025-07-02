@@ -13,9 +13,15 @@ import android.widget.VideoView;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class VideoPlayerActivity extends AppCompatActivity {
+
+    // Static map to store video positions across activity instances
+    private static final Map<String, Integer> videoPositions = new HashMap<>();
+    private static final int RESUME_THRESHOLD = 5000; // Only resume if more than 5 seconds in
 
     private VideoView videoView;
     private ImageButton btnPlayPause;
@@ -30,6 +36,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private boolean isUserSeeking = false;
     private Runnable updateSeekBarRunnable;
     private Runnable hideControlsRunnable;
+    private String currentVideoPath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +62,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private void setupVideoPlayer() {
         String videoPath = getIntent().getStringExtra("video_path");
         if (videoPath != null) {
+            currentVideoPath = videoPath;
             Uri videoUri;
 
             // Check if it's a content URI or file path
@@ -77,6 +85,14 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     tvDuration.setText(formatTime(duration));
                     tvCurrentTime.setText("00:00");
 
+                    // Restore previous position if available
+                    Integer savedPosition = videoPositions.get(currentVideoPath);
+                    if (savedPosition != null && savedPosition > RESUME_THRESHOLD && savedPosition < duration - 5000) {
+                        videoView.seekTo(savedPosition);
+                        tvCurrentTime.setText(formatTime(savedPosition));
+                        seekBar.setProgress(savedPosition);
+                    }
+
                     // Auto-play
                     videoView.start();
                     isPlaying = true;
@@ -93,6 +109,11 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     seekBar.setProgress(0);
                     tvCurrentTime.setText("00:00");
                     stopSeekBarUpdate();
+
+                    // Clear saved position when video completes
+                    if (currentVideoPath != null) {
+                        videoPositions.remove(currentVideoPath);
+                    }
                 });
 
                 // Show/hide controls on tap
@@ -153,6 +174,11 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     int currentPosition = videoView.getCurrentPosition();
                     seekBar.setProgress(currentPosition);
                     tvCurrentTime.setText(formatTime(currentPosition));
+
+                    // Save position every 5 seconds for crash recovery
+                    if (currentPosition % 5000 < 200) { // Within 200ms of a 5-second mark
+                        saveCurrentPosition();
+                    }
                 }
                 handler.postDelayed(this, 100); // Update every 100ms for smooth animation
             }
@@ -207,6 +233,18 @@ public class VideoPlayerActivity extends AppCompatActivity {
         }
     }
 
+    private void saveCurrentPosition() {
+        if (currentVideoPath != null && videoView != null) {
+            int currentPosition = videoView.getCurrentPosition();
+            int duration = videoView.getDuration();
+
+            // Don't save if video just started or almost finished
+            if (currentPosition > RESUME_THRESHOLD && currentPosition < duration - 5000) {
+                videoPositions.put(currentVideoPath, currentPosition);
+            }
+        }
+    }
+
     private void hideSystemUI() {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN |
@@ -231,6 +269,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
         }
         stopSeekBarUpdate();
         cancelControlsAutoHide();
+        saveCurrentPosition(); // Save position when pausing
     }
 
     @Override
@@ -238,5 +277,6 @@ public class VideoPlayerActivity extends AppCompatActivity {
         super.onDestroy();
         stopSeekBarUpdate();
         cancelControlsAutoHide();
+        saveCurrentPosition(); // Save position when closing
     }
 }
