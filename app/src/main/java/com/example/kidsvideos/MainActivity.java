@@ -52,11 +52,11 @@ public class MainActivity extends AppCompatActivity {
     private List<File> videoFiles;
     private SharedPreferences prefs;
     private BiometricPrompt biometricPrompt;
-    private BiometricPrompt.PromptInfo promptInfo;
-    private BiometricPrompt biometricPromptClear;
+    private BiometricPrompt.PromptInfo promptInfoAdd;
     private BiometricPrompt.PromptInfo promptInfoClear;
     private String currentSortOrder;
     private Set<String> selectedFolderUris;
+    private boolean isAuthenticatingForClear = false;
 
     private ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
@@ -233,7 +233,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupBiometricAuthentication() {
         Executor executor = ContextCompat.getMainExecutor(this);
 
-        // Biometric prompt for folder selection
+        // Single biometric prompt that handles both actions based on flag
         biometricPrompt = new BiometricPrompt((FragmentActivity) this, executor,
             new BiometricPrompt.AuthenticationCallback() {
                 @Override
@@ -246,8 +246,12 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
                     super.onAuthenticationSucceeded(result);
-                    // Authentication successful, proceed with folder selection
-                    proceedWithFolderSelection();
+                    // Route to appropriate action based on flag
+                    if (isAuthenticatingForClear) {
+                        proceedWithFolderClearing();
+                    } else {
+                        proceedWithFolderSelection();
+                    }
                 }
 
                 @Override
@@ -258,7 +262,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-        promptInfo = new BiometricPrompt.PromptInfo.Builder()
+        // Prompt info for adding folders
+        promptInfoAdd = new BiometricPrompt.PromptInfo.Builder()
             .setTitle("Folder Selection Access")
             .setSubtitle("Authenticate to add video folder")
             .setDescription("Use your fingerprint, face, or device PIN to access folder settings")
@@ -266,31 +271,7 @@ public class MainActivity extends AppCompatActivity {
                                     BiometricManager.Authenticators.DEVICE_CREDENTIAL)
             .build();
 
-        // Biometric prompt for clearing folders
-        biometricPromptClear = new BiometricPrompt((FragmentActivity) this, executor,
-            new BiometricPrompt.AuthenticationCallback() {
-                @Override
-                public void onAuthenticationError(int errorCode, CharSequence errString) {
-                    super.onAuthenticationError(errorCode, errString);
-                    Toast.makeText(MainActivity.this,
-                        "Authentication error: " + errString, Toast.LENGTH_SHORT).show();
-                }
-
-                @Override
-                public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-                    super.onAuthenticationSucceeded(result);
-                    // Authentication successful, proceed with folder clearing
-                    proceedWithFolderClearing();
-                }
-
-                @Override
-                public void onAuthenticationFailed() {
-                    super.onAuthenticationFailed();
-                    Toast.makeText(MainActivity.this,
-                        "Authentication failed", Toast.LENGTH_SHORT).show();
-                }
-            });
-
+        // Prompt info for clearing folders
         promptInfoClear = new BiometricPrompt.PromptInfo.Builder()
             .setTitle("Clear All Folders")
             .setSubtitle("Authenticate to clear video collection")
@@ -301,13 +282,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void authenticateAndSelectFolder() {
+        isAuthenticatingForClear = false; // Set flag for folder selection
         BiometricManager biometricManager = BiometricManager.from(this);
 
         switch (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK |
                                                BiometricManager.Authenticators.DEVICE_CREDENTIAL)) {
             case BiometricManager.BIOMETRIC_SUCCESS:
                 // Biometric/PIN authentication is available
-                biometricPrompt.authenticate(promptInfo);
+                biometricPrompt.authenticate(promptInfoAdd);
                 break;
             case BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE:
                 // No biometric features available - proceed without authentication
@@ -332,13 +314,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void authenticateAndClearFolders() {
+        isAuthenticatingForClear = true; // Set flag for folder clearing
         BiometricManager biometricManager = BiometricManager.from(this);
 
         switch (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK |
                                                BiometricManager.Authenticators.DEVICE_CREDENTIAL)) {
             case BiometricManager.BIOMETRIC_SUCCESS:
                 // Biometric/PIN authentication is available
-                biometricPromptClear.authenticate(promptInfoClear);
+                biometricPrompt.authenticate(promptInfoClear);
                 break;
             case BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE:
                 // No biometric features available - proceed without authentication
