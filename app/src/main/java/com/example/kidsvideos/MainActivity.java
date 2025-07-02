@@ -129,6 +129,9 @@ public class MainActivity extends AppCompatActivity {
         } else if (item.getItemId() == R.id.action_sort) {
             showSortDialog();
             return true;
+        } else if (item.getItemId() == R.id.action_clear_cache) {
+            showClearCacheDialog();
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -156,7 +159,7 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
 
-    private void showSortDialog() {
+        private void showSortDialog() {
         String[] sortOptions = {"Date Modified (Newest First)", "Date Modified (Oldest First)"};
         int selectedIndex = currentSortOrder.equals(SORT_DATE_DESC) ? 0 : 1;
 
@@ -170,6 +173,22 @@ public class MainActivity extends AppCompatActivity {
                     saveSortOrder();
                     refreshVideoList();
                 }
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
+            .show();
+    }
+
+    private void showClearCacheDialog() {
+        new AlertDialog.Builder(this)
+            .setTitle("Clear Thumbnail Cache")
+            .setMessage("This will delete all cached video thumbnails to free up storage space. Thumbnails will be regenerated as needed.\n\nProceed?")
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .setPositiveButton("Clear Cache", (dialog, which) -> {
+                ThumbnailCache.getInstance(this).clearCache();
+                Toast.makeText(this, "Thumbnail cache cleared", Toast.LENGTH_SHORT).show();
+                // Refresh video list to regenerate thumbnails
+                refreshVideoList();
                 dialog.dismiss();
             })
             .setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss())
@@ -518,5 +537,12 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = new Intent(this, VideoPlayerActivity.class);
         intent.putExtra("video_path", videoFile.getAbsolutePath());
         startActivity(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Clean up thumbnail cache resources
+        ThumbnailCache.getInstance(this).shutdown();
     }
 }

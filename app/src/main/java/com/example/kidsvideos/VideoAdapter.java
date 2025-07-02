@@ -2,10 +2,7 @@ package com.example.kidsvideos;
 
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
-import android.media.ThumbnailUtils;
 import android.net.Uri;
-import android.os.AsyncTask;
-import android.provider.MediaStore;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -87,44 +84,19 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             // Set default placeholder
             imageView.setImageResource(android.R.drawable.ic_media_play);
 
-            // Load thumbnail in background
-            new AsyncTask<Void, Void, Bitmap>() {
-                @Override
-                protected Bitmap doInBackground(Void... params) {
-                    return getVideoThumbnail(videoFile);
-                }
-
-                @Override
-                protected void onPostExecute(Bitmap thumbnail) {
+            // Use thumbnail cache for efficient loading
+            ThumbnailCache.getInstance(itemView.getContext()).getThumbnail(
+                itemView.getContext(),
+                videoFile,
+                thumbnail -> {
                     if (thumbnail != null) {
                         imageView.setImageBitmap(thumbnail);
                     }
                 }
-            }.execute();
+            );
         }
 
-        private Bitmap getVideoThumbnail(File videoFile) {
-            try {
-                MediaMetadataRetriever retriever = new MediaMetadataRetriever();
 
-                // Check if it's a content URI or regular file path
-                String path = videoFile.getAbsolutePath();
-                if (path.startsWith("content://")) {
-                    retriever.setDataSource(itemView.getContext(), Uri.parse(path));
-                } else {
-                    retriever.setDataSource(path);
-                }
-
-                // Get frame at 1 second into the video
-                Bitmap thumbnail = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-                retriever.release();
-
-                return thumbnail;
-            } catch (Exception e) {
-                e.printStackTrace();
-                return null;
-            }
-        }
 
                 private String getVideoDuration(File videoFile) {
             try {
