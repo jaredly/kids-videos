@@ -21,6 +21,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
     private ImageButton btnPlayPause;
     private ImageButton btnClose;
     private SeekBar seekBar;
+    private TextView tvCurrentTime;
     private TextView tvDuration;
     private View controlsLayout;
 
@@ -45,6 +46,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
         btnPlayPause = findViewById(R.id.btn_play_pause);
         btnClose = findViewById(R.id.btn_close);
         seekBar = findViewById(R.id.seek_bar);
+        tvCurrentTime = findViewById(R.id.tv_current_time);
         tvDuration = findViewById(R.id.tv_duration);
         controlsLayout = findViewById(R.id.controls_layout);
     }
@@ -72,6 +74,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     int duration = videoView.getDuration();
                     seekBar.setMax(duration);
                     tvDuration.setText(formatTime(duration));
+                    tvCurrentTime.setText("00:00");
 
                     // Auto-play
                     videoView.start();
@@ -84,6 +87,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
                     isPlaying = false;
                     btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
                     seekBar.setProgress(0);
+                    tvCurrentTime.setText("00:00");
                     stopSeekBarUpdate();
                 });
 
@@ -101,6 +105,7 @@ public class VideoPlayerActivity extends AppCompatActivity {
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
                     videoView.seekTo(progress);
+                    tvCurrentTime.setText(formatTime(progress));
                 }
             }
 
@@ -112,7 +117,9 @@ public class VideoPlayerActivity extends AppCompatActivity {
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 isUserSeeking = false;
-                videoView.seekTo(seekBar.getProgress());
+                int seekPosition = seekBar.getProgress();
+                videoView.seekTo(seekPosition);
+                tvCurrentTime.setText(formatTime(seekPosition));
             }
         });
     }
@@ -135,7 +142,9 @@ public class VideoPlayerActivity extends AppCompatActivity {
             @Override
             public void run() {
                 if (!isUserSeeking && videoView.isPlaying()) {
-                    seekBar.setProgress(videoView.getCurrentPosition());
+                    int currentPosition = videoView.getCurrentPosition();
+                    seekBar.setProgress(currentPosition);
+                    tvCurrentTime.setText(formatTime(currentPosition));
                 }
                 handler.postDelayed(this, 100); // Update every 100ms for smooth animation
             }
