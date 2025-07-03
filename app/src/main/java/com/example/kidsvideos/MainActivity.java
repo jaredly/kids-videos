@@ -11,6 +11,7 @@ import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -33,6 +34,7 @@ import java.util.concurrent.Executor;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
@@ -148,8 +150,22 @@ public class MainActivity extends AppCompatActivity {
     private void setupRecyclerView() {
         videoFiles = new ArrayList<>();
         videoAdapter = new VideoAdapter(videoFiles, this::playVideo);
-        recyclerVideos.setLayoutManager(new GridLayoutManager(this, 2)); // 2 columns
+
+        GridLayoutManager layoutManager = new GridLayoutManager(this, 2); // 2 columns
+        recyclerVideos.setLayoutManager(layoutManager);
         recyclerVideos.setAdapter(videoAdapter);
+
+        // Performance optimizations
+        recyclerVideos.setHasFixedSize(true); // Size won't change
+        recyclerVideos.setItemViewCacheSize(20); // Cache more view holders
+        recyclerVideos.setDrawingCacheEnabled(true);
+        recyclerVideos.setDrawingCacheQuality(View.DRAWING_CACHE_QUALITY_HIGH);
+
+        // Enable nested scrolling for smooth scrolling
+        recyclerVideos.setNestedScrollingEnabled(true);
+
+        // Optimize layout manager
+        layoutManager.setInitialPrefetchItemCount(4); // Pre-fetch items
     }
 
 
@@ -465,10 +481,10 @@ public class MainActivity extends AppCompatActivity {
     private void sortVideoFiles() {
         if (currentSortOrder.equals(SORT_DATE_DESC)) {
             // Sort by date modified, newest first
-            videoFiles.sort((f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
+            Collections.sort(videoFiles, (f1, f2) -> Long.compare(f2.lastModified(), f1.lastModified()));
         } else {
             // Sort by date modified, oldest first
-            videoFiles.sort((f1, f2) -> Long.compare(f1.lastModified(), f2.lastModified()));
+            Collections.sort(videoFiles, (f1, f2) -> Long.compare(f1.lastModified(), f2.lastModified()));
         }
     }
 
@@ -506,6 +522,8 @@ public class MainActivity extends AppCompatActivity {
 
 
     private void loadVideosFromFolder(File folder) {
+        // Cancel any ongoing precaching before loading new videos
+        ThumbnailCache.getInstance(this).cancelPrecaching();
         videoFiles.clear();
 
         if (folder != null && folder.exists() && folder.canRead()) {
@@ -521,9 +539,14 @@ public class MainActivity extends AppCompatActivity {
 
         sortVideoFiles();
         updateUI(folder);
+
+        // Start metadata precaching in background
+        startMetadataPrecaching();
     }
 
     private void loadVideosFromAllFolders() {
+        // Cancel any ongoing precaching before loading new videos
+        ThumbnailCache.getInstance(this).cancelPrecaching();
         videoFiles.clear();
 
         // Load videos from all selected folders
@@ -549,6 +572,9 @@ public class MainActivity extends AppCompatActivity {
         sortVideoFiles();
         updateToolbarWithFolderCount();
         updateVideoListUI();
+
+        // Start metadata precaching in background
+        startMetadataPrecaching();
     }
 
     private void loadVideosFromUri(Uri uri, boolean updateUI) {
@@ -696,10 +722,54 @@ public class MainActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
+    private void startMetadataPrecaching() {
+        if (videoFiles.isEmpty()) {
+            return;
+        }
+
+        // Show subtle progress indication in toolbar subtitle
+        if (getSupportActionBar() != null) {
+            String currentSubtitle = getSupportActionBar().getSubtitle() != null ?
+                getSupportActionBar().getSubtitle().toString() : "";
+            getSupportActionBar().setSubtitle(currentSubtitle + " • Optimizing...");
+        }
+
+        // Start precaching with progress callback
+        ThumbnailCache.getInstance(this).precacheMetadata(this, videoFiles,
+            new ThumbnailCache.PrecacheProgressCallback() {
+                @Override
+                public void onProgress(int processed, int total) {
+                    // Update subtitle with progress (optional, can be removed for less UI noise)
+                    if (getSupportActionBar() != null && processed % 10 == 0) { // Update every 10th video
+                        String currentSubtitle = getSupportActionBar().getSubtitle() != null ?
+                            getSupportActionBar().getSubtitle().toString() : "";
+                        String baseSubtitle = currentSubtitle.split(" • ")[0]; // Remove previous progress text
+                        getSupportActionBar().setSubtitle(baseSubtitle + " • Optimizing " + processed + "/" + total);
+                    }
+                }
+
+                @Override
+                public void onComplete() {
+                    // Remove optimizing text from subtitle
+                    if (getSupportActionBar() != null) {
+                        String currentSubtitle = getSupportActionBar().getSubtitle() != null ?
+                            getSupportActionBar().getSubtitle().toString() : "";
+                        String baseSubtitle = currentSubtitle.split(" • ")[0]; // Remove progress text
+                        getSupportActionBar().setSubtitle(baseSubtitle);
+                    }
+                }
+            });
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // Clean up thumbnail cache resources
+        // Clean up adapter's background tasks
+        if (videoAdapter != null) {
+            videoAdapter.cleanup();
+        }
+        // Cancel any ongoing precaching and clean up thumbnail cache resources
+        ThumbnailCache.getInstance(this).cancelPrecaching();
         ThumbnailCache.getInstance(this).shutdown();
     }
 }

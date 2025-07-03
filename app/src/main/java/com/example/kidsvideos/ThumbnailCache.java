@@ -7,13 +7,21 @@ import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
+import java.util.List;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class ThumbnailCache {
     private static final String TAG = "ThumbnailCache";
@@ -25,9 +33,17 @@ public class ThumbnailCache {
     private static ThumbnailCache instance;
     private final File cacheDir;
     private final ExecutorService executor;
+    private final ExecutorService precacheExecutor;
+    private final Map<String, String> metadataCache; // In-memory cache for metadata
+    private Future<?> currentPrecacheTask;
 
     public interface ThumbnailCallback {
         void onThumbnailLoaded(Bitmap thumbnail);
+    }
+
+    public interface PrecacheProgressCallback {
+        void onProgress(int processed, int total);
+        void onComplete();
     }
 
     private ThumbnailCache(Context context) {
@@ -38,6 +54,8 @@ public class ThumbnailCache {
         }
 
         executor = Executors.newFixedThreadPool(3); // Limit concurrent thumbnail generation
+        precacheExecutor = Executors.newFixedThreadPool(2); // Dedicated threads for precaching
+        metadataCache = new ConcurrentHashMap<>();
 
         // Clean up old cache files on startup
         cleanupCache();
@@ -69,6 +87,156 @@ public class ThumbnailCache {
         });
     }
 
+    // New method to cache metadata
+    public void cacheMetadata(java.io.File videoFile, String metadataType, String value) {
+        String cacheKey = generateCacheKey(videoFile) + "_" + metadataType;
+        metadataCache.put(cacheKey, value);
+
+        // Also save to disk for persistence
+        executor.execute(() -> {
+            File metadataFile = new File(cacheDir, cacheKey + ".txt");
+            try (FileWriter writer = new FileWriter(metadataFile)) {
+                writer.write(value);
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to save metadata to cache", e);
+            }
+        });
+    }
+
+    // New method to retrieve cached metadata
+    public String getCachedMetadata(java.io.File videoFile, String metadataType) {
+        String cacheKey = generateCacheKey(videoFile) + "_" + metadataType;
+
+        // Check in-memory cache first
+        String cached = metadataCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
+        // Check disk cache
+        File metadataFile = new File(cacheDir, cacheKey + ".txt");
+        if (metadataFile.exists() && metadataFile.lastModified() >= videoFile.lastModified()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(metadataFile))) {
+                String value = reader.readLine();
+                if (value != null) {
+                    metadataCache.put(cacheKey, value); // Cache in memory for next time
+                    return value;
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "Failed to read cached metadata", e);
+            }
+        }
+
+        return null;
+    }
+
+    // New method to precache metadata for all videos
+    public void precacheMetadata(Context context, List<java.io.File> videoFiles, PrecacheProgressCallback callback) {
+        // Cancel any existing precaching
+        cancelPrecaching();
+
+        if (videoFiles == null || videoFiles.isEmpty()) {
+            if (callback != null) {
+                callback.onComplete();
+            }
+            return;
+        }
+
+        Log.d(TAG, "Starting metadata precaching for " + videoFiles.size() + " videos");
+
+        currentPrecacheTask = precacheExecutor.submit(() -> {
+            int total = videoFiles.size();
+            int processed = 0;
+
+            for (java.io.File videoFile : videoFiles) {
+                // Check if task was cancelled
+                if (Thread.currentThread().isInterrupted()) {
+                    Log.d(TAG, "Precaching cancelled");
+                    return;
+                }
+
+                try {
+                    // Check if metadata is already cached
+                    String cachedDuration = getCachedMetadata(videoFile, "duration");
+
+                    if (cachedDuration == null) {
+                        // Calculate and cache duration
+                        String duration = calculateVideoDuration(context, videoFile);
+                        if (duration != null) {
+                            cacheMetadata(videoFile, "duration", duration);
+                            Log.d(TAG, "Precached duration for: " + videoFile.getName());
+                        }
+                    }
+
+                    processed++;
+
+                    // Update progress on main thread
+                    if (callback != null) {
+                        final int currentProgress = processed;
+                        android.os.Handler mainHandler = new android.os.Handler(context.getMainLooper());
+                        mainHandler.post(() -> callback.onProgress(currentProgress, total));
+                    }
+
+                    // Small delay to prevent overwhelming the system
+                    Thread.sleep(50);
+
+                } catch (InterruptedException e) {
+                    Log.d(TAG, "Precaching interrupted");
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception e) {
+                    Log.e(TAG, "Error precaching metadata for " + videoFile.getAbsolutePath(), e);
+                    processed++; // Still count as processed even if failed
+                }
+            }
+
+            Log.d(TAG, "Metadata precaching completed for " + processed + " videos");
+
+            // Notify completion on main thread
+            if (callback != null) {
+                android.os.Handler mainHandler = new android.os.Handler(context.getMainLooper());
+                mainHandler.post(callback::onComplete);
+            }
+        });
+    }
+
+    // Method to cancel ongoing precaching
+    public void cancelPrecaching() {
+        if (currentPrecacheTask != null && !currentPrecacheTask.isDone()) {
+            currentPrecacheTask.cancel(true);
+            Log.d(TAG, "Cancelled ongoing precaching");
+        }
+    }
+
+    // Helper method to calculate video duration
+    private String calculateVideoDuration(Context context, java.io.File videoFile) {
+        try {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+
+            // Check if it's a content URI or regular file path
+            String path = videoFile.getAbsolutePath();
+            if (path.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(path));
+            } else {
+                retriever.setDataSource(path);
+            }
+
+            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            retriever.release();
+
+            if (durationStr != null && !durationStr.isEmpty()) {
+                long duration = Long.parseLong(durationStr);
+                long minutes = TimeUnit.MILLISECONDS.toMinutes(duration);
+                long seconds = TimeUnit.MILLISECONDS.toSeconds(duration) -
+                              TimeUnit.MINUTES.toSeconds(minutes);
+                return String.format("%02d:%02d", minutes, seconds);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error calculating duration for " + videoFile.getAbsolutePath(), e);
+        }
+        return "Unknown";
+    }
+
     private Bitmap loadThumbnail(Context context, java.io.File videoFile) {
         String cacheKey = generateCacheKey(videoFile);
         File cacheFile = new File(cacheDir, cacheKey + ".jpg");
@@ -98,7 +266,7 @@ public class ThumbnailCache {
         return thumbnail;
     }
 
-        private Bitmap generateThumbnail(Context context, java.io.File videoFile) {
+    private Bitmap generateThumbnail(Context context, java.io.File videoFile) {
         try {
             MediaMetadataRetriever retriever = new MediaMetadataRetriever();
 
@@ -207,6 +375,9 @@ public class ThumbnailCache {
     }
 
     public void clearCache() {
+        // Cancel any ongoing precaching
+        cancelPrecaching();
+
         executor.execute(() -> {
             try {
                 File[] cacheFiles = cacheDir.listFiles();
@@ -215,6 +386,7 @@ public class ThumbnailCache {
                         file.delete();
                     }
                 }
+                metadataCache.clear(); // Clear in-memory cache too
                 Log.d(TAG, "Cache cleared");
             } catch (Exception e) {
                 Log.e(TAG, "Error clearing cache", e);
@@ -223,6 +395,20 @@ public class ThumbnailCache {
     }
 
     public void shutdown() {
+        cancelPrecaching();
         executor.shutdown();
+        precacheExecutor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+            if (!precacheExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                precacheExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            precacheExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }
