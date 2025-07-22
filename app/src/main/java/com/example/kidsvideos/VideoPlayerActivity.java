@@ -1,6 +1,7 @@
 package com.example.kidsvideos;
 
 import android.media.MediaPlayer;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -123,7 +124,12 @@ public class VideoPlayerActivity extends AppCompatActivity {
 
     private void setupControls() {
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
-        btnClose.setOnClickListener(v -> finish());
+        btnClose.setOnClickListener(v -> {
+            Intent intent = new Intent(VideoPlayerActivity.this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+            finish();
+        });
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -278,5 +284,8 @@ public class VideoPlayerActivity extends AppCompatActivity {
         stopSeekBarUpdate();
         cancelControlsAutoHide();
         saveCurrentPosition(); // Save position when closing
+        if (videoView != null) {
+            videoView.stopPlayback();
+        }
     }
 }
